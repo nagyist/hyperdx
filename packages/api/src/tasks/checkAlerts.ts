@@ -229,6 +229,10 @@ const handleSendSlackWebhook = async (
   });
 };
 
+export const escapeJsonString = (str: string) => {
+  return JSON.stringify(str).slice(1, -1);
+};
+
 export const handleSendGenericWebhook = async (
   webhook: IWebhook,
   message: {
@@ -270,14 +274,16 @@ export const handleSendGenericWebhook = async (
 
   // BODY
 
-  let parsedBody: Record<string, string | number | symbol> = {};
+  let body = '';
   if (webhook.body) {
-    const injectedBody = injectIntoPlaceholders(JSON.stringify(webhook.body), {
-      $HDX_ALERT_URL: message.hdxLink,
-      $HDX_ALERT_TITLE: message.title,
-      $HDX_ALERT_BODY: message.body,
+    const handlebars = Handlebars.create();
+    body = handlebars.compile(webhook.body, {
+      noEscape: true,
+    })({
+      body: escapeJsonString(message.body),
+      link: escapeJsonString(message.hdxLink),
+      title: escapeJsonString(message.title),
     });
-    parsedBody = JSON.parse(injectedBody);
   }
 
   try {
@@ -285,11 +291,12 @@ export const handleSendGenericWebhook = async (
     const response = await fetch(url, {
       method: 'POST',
       headers: headers as Record<string, string>,
-      body: JSON.stringify(parsedBody),
+      body,
     });
 
     if (!response.ok) {
-      throw new Error('Failed to send generic webhook message');
+      const errorText = await response.text();
+      throw new Error(errorText);
     }
   } catch (e) {
     logger.error({
@@ -298,32 +305,6 @@ export const handleSendGenericWebhook = async (
     });
   }
 };
-
-type HDXGenericWebhookTemplateValues = {
-  $HDX_ALERT_URL?: string;
-  $HDX_ALERT_TITLE?: string;
-  $HDX_ALERT_BODY?: string;
-};
-
-export function injectIntoPlaceholders(
-  placeholderString: string,
-  valuesToInject: HDXGenericWebhookTemplateValues,
-) {
-  return placeholderString.replace(/(\$\w+)/g, function (match) {
-    const replacement =
-      valuesToInject[match as keyof HDXGenericWebhookTemplateValues] || match;
-    return escapeJsonValues(replacement);
-  });
-}
-
-export function escapeJsonValues(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r')
-    .replace(/\t/g, '\\t');
-}
 
 export const buildAlertMessageTemplateHdxLink = ({
   alert,
@@ -820,8 +801,15 @@ export const processAlert = async (now: Date, alert: AlertDocument) => {
       createdAt: nowInMinsRoundDown,
       state: alertState,
     }).save();
+
     if (checksData?.rows && checksData?.rows > 0) {
       for (const checkData of checksData.data) {
+        // TODO: we might want to fix the null value from the upstream
+        // this happens when the ratio is 0/0
+        if (checkData.data == null) {
+          continue;
+        }
+
         const totalCount = isString(checkData.data)
           ? parseInt(checkData.data)
           : checkData.data;

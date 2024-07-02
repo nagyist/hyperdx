@@ -1,5 +1,43 @@
 # @hyperdx/api
 
+## 1.9.0
+
+### Minor Changes
+
+- 2488882: Allow to filter search results by event type (log or span)
+
+### Patch Changes
+
+- 63e7d30: fix: Properly show session replays from very long sessions in client
+  sessions search results
+- 884938a: fix: doesExceedThreshold greater than logic
+- 25faa4d: chore: bump HyperDX SDKs (node-opentelemetry v0.8.0 + browser 0.21.0)
+- 288c763: fix: handle null ratio value (alerting)
+- da866be: fix: revisit doesExceedThreshold logic
+- b192366: chore: bump node to v18.20.3
+- 148c92b: perf: remove redundant otel-logs fields (timestamp + spanID +
+  traceID)
+
+## 1.8.0
+
+### Minor Changes
+
+- 4d6fb8f: feat: GA service health dashboard + metrics alert
+- 0e365bf: this change enables generic webhooks. no existing webhook behavior
+  will be impacted by this change.
+- 4d6fb8f: feat: GA k8s dashboard / metrics side panel
+
+### Patch Changes
+
+- eefe597: Show client sessions with no user interactions but has recording by
+  default
+- b454003: feat: introduce conditional alert routing helper #is_match
+- d3e270a: chore: bump vector to v0.37.0
+- 3b1fe08: feat + fix: add webhook endpoints validators + parse webhook JSON
+  body
+- 5fc7c21: feat: use handlebar to build up webhook body
+- 4a85e22: chore: bump @clickhouse/client to v0.2.10
+
 ## 1.7.0
 
 ### Patch Changes

@@ -1,12 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import cx from 'classnames';
-import { format } from 'date-fns';
-import { formatInTimeZone } from 'date-fns-tz';
 import curry from 'lodash/curry';
 import { Button, Modal } from 'react-bootstrap';
 import { CSVLink } from 'react-csv';
 import { useHotkeys } from 'react-hotkeys-hook';
 import stripAnsi from 'strip-ansi';
+import { Text } from '@mantine/core';
 import {
   CellContext,
   ColumnDef,
@@ -21,18 +20,17 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 
 import api from './api';
 import Checkbox from './Checkbox';
+import { IS_LOCAL_MODE } from './config';
 import FieldMultiSelect from './FieldMultiSelect';
 import InstallInstructionsModal from './InstallInstructionsModal';
 import LogLevel from './LogLevel';
 import { useSearchEventStream } from './search';
 import { UNDEFINED_WIDTH } from './tableUtils';
-import type { TimeFormat } from './useUserPreferences';
-import useUserPreferences from './useUserPreferences';
+import { FormatTime } from './useFormatTime';
+import { useUserPreferences } from './useUserPreferences';
 import { useLocalStorage, usePrevious, useWindowSize } from './utils';
-import { TIME_TOKENS } from './utils';
 
 import styles from '../styles/LogTable.module.scss';
-
 type Row = Record<string, any> & { duration: number };
 type AccessorFn = (row: Row, column: string) => any;
 
@@ -44,6 +42,8 @@ const ACCESSOR_MAP: Record<string, AccessorFn> = {
     row.duration >= 0 ? row.duration : SPECIAL_VALUES.not_available,
   default: (row, column) => row[column],
 };
+
+const MAX_SCROLL_FETCH_NEW_PAGE_ATTEMPTS = 20;
 
 function retrieveColumnValue(column: string, row: Row): any {
   const accessor = ACCESSOR_MAP[column] ?? ACCESSOR_MAP.default;
@@ -129,7 +129,7 @@ function DownloadCSVButton({
           </Button>
         </CSVLink>
       ) : (
-        <span>An error occured.</span>
+        <span>An error occurred.</span>
       )}
     </>
   );
@@ -140,19 +140,16 @@ function LogTableSettingsModal({
   onHide,
   onDone,
   initialAdditionalColumns,
-  initialIsUTC,
   initialWrapLines,
   downloadCSVButton,
 }: {
   initialAdditionalColumns: string[];
-  initialIsUTC: boolean;
   initialWrapLines: boolean;
   show: boolean;
   onHide: () => void;
   onDone: (settings: {
     additionalColumns: string[];
     wrapLines: boolean;
-    isUTC: boolean;
   }) => void;
   downloadCSVButton: JSX.Element;
 }) {
@@ -160,7 +157,6 @@ function LogTableSettingsModal({
     initialAdditionalColumns,
   );
   const [wrapLines, setWrapLines] = useState(initialWrapLines);
-  const [isUTC, setIsUTC] = useState(initialIsUTC);
 
   return (
     <Modal
@@ -186,14 +182,9 @@ function LogTableSettingsModal({
           onChange={() => setWrapLines(!wrapLines)}
           label="Wrap Lines"
         />
-        <Checkbox
-          id="utc"
-          className="mt-4"
-          labelClassName="fs-7"
-          checked={isUTC}
-          onChange={() => setIsUTC(!isUTC)}
-          label="Use UTC time instead of local time"
-        />
+        <div className="mt-4 text-muted fs-8">
+          UTC setting moved to User Preferences
+        </div>
         <div className="mt-4">
           <div className="mb-2">Download Search Results</div>
           {downloadCSVButton}
@@ -203,7 +194,7 @@ function LogTableSettingsModal({
             variant="outline-success"
             className="fs-7 text-muted-hover"
             onClick={() => {
-              onDone({ additionalColumns, wrapLines, isUTC });
+              onDone({ additionalColumns, wrapLines });
               onHide();
             }}
           >
@@ -223,7 +214,6 @@ export const RawLogTable = memo(
     tableId,
     displayedColumns,
     fetchNextPage,
-    formatUTC,
     hasNextPage,
     highlightedLineId,
     isLive,
@@ -252,14 +242,13 @@ export const RawLogTable = memo(
       timestamp: string;
     }[];
     isLoading: boolean;
-    fetchNextPage: () => any;
+    fetchNextPage: (arg0?: { cb?: VoidFunction }) => any;
     onRowExpandClick: (id: string, sortKey: string) => void;
     // onPropertySearchClick: (
     //   name: string,
     //   value: string | number | boolean,
     // ) => void;
     hasNextPage: boolean;
-    formatUTC: boolean;
     highlightedLineId: string | undefined;
     onScroll: (scrollTop: number) => void;
     isLive: boolean;
@@ -281,14 +270,14 @@ export const RawLogTable = memo(
 
     const { width } = useWindowSize();
     const isSmallScreen = (width ?? 1000) < 900;
-    const timeFormat: TimeFormat = useUserPreferences().timeFormat;
-    const tsFormat = TIME_TOKENS[timeFormat];
+    const {
+      userPreferences: { isUTC },
+    } = useUserPreferences();
 
     const [columnSizeStorage, setColumnSizeStorage] = useLocalStorage<
       Record<string, number>
     >(`${tableId}-column-sizes`, {});
 
-    const tsShortFormat = 'HH:mm:ss';
     //once the user has scrolled within 500px of the bottom of the table, fetch more data if there is any
     const FETCH_NEXT_PAGE_PX = 500;
 
@@ -338,19 +327,16 @@ export const RawLogTable = memo(
           header: () =>
             isSmallScreen
               ? 'Time'
-              : `Timestamp${formatUTC ? ' (UTC)' : ' (Local)'}`,
+              : `Timestamp${isUTC ? ' (UTC)' : ' (Local)'}`,
           cell: info => {
             // FIXME: since original timestamp doesn't come with timezone info
             const date = new Date(info.getValue<string>());
             return (
               <span className="text-muted">
-                {formatUTC
-                  ? formatInTimeZone(
-                      date,
-                      'Etc/UTC',
-                      isSmallScreen ? tsShortFormat : tsFormat,
-                    )
-                  : format(date, isSmallScreen ? tsShortFormat : tsFormat)}
+                <FormatTime
+                  value={date}
+                  format={isSmallScreen ? 'short' : 'withMs'}
+                />
               </span>
             );
           },
@@ -412,16 +398,18 @@ export const RawLogTable = memo(
           header: () => (
             <span>
               Message{' '}
-              {onShowPatternsClick != null && (
+              {onShowPatternsClick != null && !IS_LOCAL_MODE && (
                 <span>
                   •{' '}
-                  <span
-                    role="button"
-                    className="text-muted-hover fw-normal text-decoration-underline"
+                  <Text
+                    span
+                    size="xs"
+                    c="green"
                     onClick={onShowPatternsClick}
+                    role="button"
                   >
-                    Show Log Patterns
-                  </span>
+                    <i className="bi bi-collection"></i> Group Similar Events
+                  </Text>
                 </span>
               )}
             </span>
@@ -432,7 +420,7 @@ export const RawLogTable = memo(
         },
       ],
       [
-        formatUTC,
+        isUTC,
         highlightedLineId,
         onRowExpandClick,
         displayedColumns,
@@ -441,7 +429,6 @@ export const RawLogTable = memo(
         columnSizeStorage,
         showServiceColumn,
         columnNameMap,
-        tsFormat,
       ],
     );
 
@@ -526,15 +513,33 @@ export const RawLogTable = memo(
     );
 
     // Scroll to log id if it's not in window yet
+    const [scrolledToHighlightedLine, setScrolledToHighlightedLine] =
+      useState(false);
+    const [scrolledToHighlightedLineCount, setScrolledToHighlightedLineCount] =
+      useState(0);
+
     useEffect(() => {
-      if (highlightedLineId == null || rowVirtualizer == null) {
+      if (
+        scrolledToHighlightedLine ||
+        highlightedLineId == null ||
+        rowVirtualizer == null
+      ) {
         return;
       }
 
       const rowIdx = dedupLogs.findIndex(l => l.id === highlightedLineId);
       if (rowIdx == -1) {
-        fetchNextPage();
+        if (
+          scrolledToHighlightedLineCount < MAX_SCROLL_FETCH_NEW_PAGE_ATTEMPTS
+        ) {
+          fetchNextPage({
+            cb: () => {
+              setScrolledToHighlightedLineCount(prev => prev + 1);
+            },
+          });
+        }
       } else {
+        setScrolledToHighlightedLine(true);
         if (
           rowVirtualizer.getVirtualItems().find(l => l.index === rowIdx) == null
         ) {
@@ -548,9 +553,9 @@ export const RawLogTable = memo(
       highlightedLineId,
       fetchNextPage,
       rowVirtualizer,
-      // Needed to make sure we call this again when the log search loading
-      // state is done to fetch next page
+      scrolledToHighlightedLine,
       isLoading,
+      scrolledToHighlightedLineCount,
     ]);
 
     const shiftHighlightedLineId = useCallback(
@@ -573,10 +578,12 @@ export const RawLogTable = memo(
       [highlightedLineId, onRowExpandClick, dedupLogs],
     );
 
-    useHotkeys(['ArrowRight', 'j'], () => {
+    useHotkeys(['ArrowRight', 'ArrowDown', 'j'], e => {
+      e.preventDefault();
       shiftHighlightedLineId(1);
     });
-    useHotkeys(['ArrowLeft', 'k'], () => {
+    useHotkeys(['ArrowLeft', 'ArrowUp', 'k'], e => {
+      e.preventDefault();
       shiftHighlightedLineId(-1);
     });
 
@@ -789,10 +796,8 @@ export default function LogTable({
   highlightedLineId,
   onPropertySearchClick,
   onRowExpandClick,
-  formatUTC,
   isLive,
   onScroll,
-  setIsUTC,
   onEnd,
   onShowPatternsClick,
   tableId,
@@ -811,10 +816,8 @@ export default function LogTable({
     value: string | number | boolean,
   ) => void;
   onRowExpandClick: (logId: string, sortKey: string) => void;
-  formatUTC: boolean;
   onScroll: (scrollTop: number) => void;
   isLive: boolean;
-  setIsUTC: (isUTC: boolean) => void;
   onEnd?: () => void;
   onShowPatternsClick?: () => void;
   tableId?: string;
@@ -830,6 +833,10 @@ export default function LogTable({
   const prevQueryConfig = usePrevious({ searchedQuery, isLive });
 
   const resultsKey = [searchedQuery, displayedColumns, isLive].join(':');
+
+  const {
+    userPreferences: { isUTC },
+  } = useUserPreferences();
 
   const {
     results: searchResults,
@@ -885,16 +892,14 @@ export default function LogTable({
         onHide={() => setInstructionsOpen(false)}
       />
       <LogTableSettingsModal
-        key={`${formatUTC} ${displayedColumns} ${wrapLines}`}
+        key={`${isUTC} ${displayedColumns} ${wrapLines}`}
         show={settingsOpen}
-        initialIsUTC={formatUTC}
         initialAdditionalColumns={displayedColumns}
         initialWrapLines={wrapLines}
         onHide={() => setSettingsOpen(false)}
-        onDone={({ additionalColumns, wrapLines, isUTC }) => {
+        onDone={({ additionalColumns, wrapLines }) => {
           setDisplayedColumns(additionalColumns);
           setWrapLines(wrapLines);
-          setIsUTC(isUTC);
         }}
         downloadCSVButton={
           <DownloadCSVButton
@@ -923,12 +928,11 @@ export default function LogTable({
         logs={searchResults ?? []}
         isLoading={isLoading}
         fetchNextPage={useCallback(
-          () => fetchNextPage({ limit: 200 }),
+          (args: any) => fetchNextPage({ limit: 200, ...args }),
           [fetchNextPage],
         )}
         // onPropertySearchClick={onPropertySearchClick}
         hasNextPage={hasNextPageWhenNotLive}
-        formatUTC={formatUTC}
         onRowExpandClick={onRowExpandClick}
         onScroll={onScroll}
         onShowPatternsClick={onShowPatternsClick}

@@ -5,7 +5,6 @@ import cx from 'classnames';
 import { add, Duration, formatRelative } from 'date-fns';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useQueryClient } from 'react-query';
-import { toast } from 'react-toastify';
 import { ArrayParam, useQueryParam, withDefault } from 'use-query-params';
 import {
   Alert as MAlert,
@@ -17,13 +16,14 @@ import {
   Stack,
   Tooltip,
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 
 import api from './api';
 import { withAppNav } from './layout';
 import { Tags } from './Tags';
 import type { Alert, AlertHistory, LogView } from './types';
 import { AlertState } from './types';
-import { formatHumanReadableDate } from './utils';
+import { FormatTime } from './useFormatTime';
 
 import styles from '../styles/AlertsPage.module.scss';
 
@@ -111,7 +111,10 @@ function AckAlert({ alert }: { alert: Alert }) {
         queryClient.invalidateQueries('alerts');
       },
       onError: () => {
-        toast.error('Failed to silence alert, please try again later.');
+        notifications.show({
+          color: 'red',
+          message: 'Failed to silence alert, please try again later.',
+        });
       },
     }),
     [queryClient],
@@ -162,7 +165,7 @@ function AckAlert({ alert }: { alert: Alert }) {
                 </>
               ) : null}{' '}
               on <br />
-              {formatHumanReadableDate(new Date(alert.silenced?.at))}
+              <FormatTime value={alert.silenced?.at} />
               .<br />
             </Menu.Label>
 
@@ -171,8 +174,7 @@ function AckAlert({ alert }: { alert: Alert }) {
                 'Alert resumed.'
               ) : (
                 <>
-                  Resumes{' '}
-                  {formatHumanReadableDate(new Date(alert.silenced.until))}
+                  Resumes <FormatTime value={alert.silenced.until} />.
                 </>
               )}
             </Menu.Label>
@@ -327,7 +329,7 @@ function AlertDetails({ alert }: { alert: AlertData }) {
           </div>
           <div className="text-slate-400 fs-8 d-flex gap-2">
             If {alert.source === 'LOG' ? 'count' : 'value'} is{' '}
-            {alert.type === 'presence' ? 'over' : 'under'}{' '}
+            {alert.type === 'presence' ? 'at least' : 'under'}{' '}
             <span className="fw-bold">{alert.threshold}</span>
             <span className="text-slate-400">&middot;</span>
             {alert.channel.type === 'webhook' && (

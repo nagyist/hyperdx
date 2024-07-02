@@ -3,111 +3,29 @@ import type { NextPage } from 'next';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
 import { NextAdapter } from 'next-query-params';
+import { enableMapSet } from 'immer';
 import SSRProvider from 'react-bootstrap/SSRProvider';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { ReactQueryDevtools } from 'react-query/devtools';
-import { ToastContainer } from 'react-toastify';
 import { QueryParamProvider } from 'use-query-params';
-import {
-  ColorSchemeScript,
-  MantineProvider,
-  MantineThemeOverride,
-} from '@mantine/core';
+import HyperDX from '@hyperdx/browser';
+import { ColorSchemeScript } from '@mantine/core';
 
-import * as config from '../src/config';
+import { apiConfigs } from '../src/api';
+import { ThemeWrapper } from '../src/ThemeWrapper';
 import { useConfirmModal } from '../src/useConfirm';
 import { QueryParamProvider as HDXQueryParamProvider } from '../src/useQueryParam';
-import { UserPreferencesProvider } from '../src/useUserPreferences';
+import { useBackground, useUserPreferences } from '../src/useUserPreferences';
 
 import '@mantine/core/styles.css';
-import 'react-toastify/dist/ReactToastify.css';
+import '@mantine/notifications/styles.css';
 import '../styles/globals.css';
 import '../styles/app.scss';
 import '../src/LandingPage.scss';
 
-const queryClient = new QueryClient();
-import HyperDX from '@hyperdx/browser';
+enableMapSet();
 
-const mantineTheme: MantineThemeOverride = {
-  fontFamily: 'IBM Plex Mono, sans-serif',
-  primaryColor: 'green',
-  primaryShade: 8,
-  white: '#fff',
-  fontSizes: {
-    xs: '12px',
-    sm: '13px',
-    md: '15px',
-    lg: '16px',
-    xl: '18px',
-  },
-  colors: {
-    green: [
-      '#e2ffeb',
-      '#cdffd9',
-      '#9bfdb5',
-      '#67fb8d',
-      '#3bf96b',
-      '#1ef956',
-      '#03f84a',
-      '#00dd3a',
-      '#00c531',
-      '#00aa23',
-    ],
-    dark: [
-      '#C1C2C5',
-      '#A6A7AB',
-      '#909296',
-      '#5C5F66',
-      '#373A40',
-      '#2C2E33',
-      '#25262B',
-      '#1A1B1E',
-      '#141517',
-      '#101113',
-    ],
-  },
-  headings: {
-    fontFamily: 'IBM Plex Mono, sans-serif',
-  },
-  components: {
-    Modal: {
-      styles: {
-        header: {
-          fontFamily: 'IBM Plex Mono, sans-serif',
-          fontWeight: 'bold',
-        },
-      },
-    },
-    InputWrapper: {
-      styles: {
-        label: {
-          marginBottom: 4,
-        },
-        description: {
-          marginBottom: 8,
-          lineHeight: 1.3,
-        },
-      },
-    },
-    Card: {
-      styles: {
-        root: {
-          backgroundColor: '#191B1F',
-        },
-      },
-    },
-    Checkbox: {
-      styles: {
-        input: {
-          cursor: 'pointer',
-        },
-        label: {
-          cursor: 'pointer',
-        },
-      },
-    },
-  },
-};
+const queryClient = new QueryClient();
 
 export type NextPageWithLayout<P = {}, IP = P> = NextPage<P, IP> & {
   getLayout?: (page: React.ReactElement) => React.ReactNode;
@@ -118,20 +36,32 @@ type AppPropsWithLayout = AppProps & {
 };
 
 export default function MyApp({ Component, pageProps }: AppPropsWithLayout) {
+  const { userPreferences } = useUserPreferences();
   const confirmModal = useConfirmModal();
+  const background = useBackground(userPreferences);
 
   // port to react query ? (needs to wrap with QueryClientProvider)
   useEffect(() => {
     fetch('/api/config')
       .then(res => res.json())
       .then(_jsonData => {
+        // Set API url dynamically for users who aren't rebuilding
+        try {
+          const url = new URL(_jsonData.apiServerUrl);
+          if (url != null) {
+            apiConfigs.prefixUrl = url.toString().replace(/\/$/, '');
+          }
+        } catch (err) {
+          // ignore
+        }
+
         if (_jsonData?.apiKey) {
           let hostname;
           try {
             const url = new URL(_jsonData.apiServerUrl);
             hostname = url.hostname;
           } catch (err) {
-            // console.log(err);
+            // ignore
           }
           HyperDX.init({
             apiKey: _jsonData.apiKey,
@@ -149,7 +79,16 @@ export default function MyApp({ Component, pageProps }: AppPropsWithLayout) {
       .catch(err => {
         // ignore
       });
-  });
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.className =
+      userPreferences.theme === 'dark' ? 'hdx-theme-dark' : 'hdx-theme-light';
+    // TODO: Remove after migration to Mantine
+    document.body.style.fontFamily = userPreferences.font
+      ? `"${userPreferences.font}", sans-serif`
+      : '"IBM Plex Mono"';
+  }, [userPreferences.theme, userPreferences.font]);
 
   const getLayout = Component.getLayout ?? (page => page);
 
@@ -176,6 +115,7 @@ export default function MyApp({ Component, pageProps }: AppPropsWithLayout) {
           content="width=device-width, initial-scale=0.75"
         />
         <meta name="theme-color" content="#25292e"></meta>
+        <meta name="google" content="notranslate" />
         <ColorSchemeScript forceColorScheme="dark" />
       </Head>
 
@@ -183,14 +123,15 @@ export default function MyApp({ Component, pageProps }: AppPropsWithLayout) {
         <HDXQueryParamProvider>
           <QueryParamProvider adapter={NextAdapter}>
             <QueryClientProvider client={queryClient}>
-              <UserPreferencesProvider>
-                <ToastContainer position="bottom-right" theme="dark" />
-                <MantineProvider forceColorScheme="dark" theme={mantineTheme}>
-                  {getLayout(<Component {...pageProps} />)}
-                </MantineProvider>
-                <ReactQueryDevtools initialIsOpen={false} />
-                {confirmModal}
-              </UserPreferencesProvider>
+              <ThemeWrapper fontFamily={userPreferences.font}>
+                {getLayout(<Component {...pageProps} />)}
+              </ThemeWrapper>
+              <ReactQueryDevtools
+                initialIsOpen={false}
+                position="bottom-right"
+              />
+              {confirmModal}
+              {background}
             </QueryClientProvider>
           </QueryParamProvider>
         </HDXQueryParamProvider>

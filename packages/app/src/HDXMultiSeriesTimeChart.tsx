@@ -1,9 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import cx from 'classnames';
-import { add, format } from 'date-fns';
+import { add } from 'date-fns';
 import { withErrorBoundary } from 'react-error-boundary';
-import { toast } from 'react-toastify';
 import {
   Bar,
   BarChart,
@@ -19,6 +18,7 @@ import {
   YAxis,
 } from 'recharts';
 import { Popover } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 
 import api from './api';
 import {
@@ -28,9 +28,9 @@ import {
   seriesToUrlSearchQueryParam,
 } from './ChartUtils';
 import type { ChartSeries, NumberFormat } from './types';
-import useUserPreferences, { TimeFormat } from './useUserPreferences';
+import { FormatTime, useFormatTime } from './useFormatTime';
 import { formatNumber } from './utils';
-import { semanticKeyedColor, TIME_TOKENS, truncateMiddle } from './utils';
+import { semanticKeyedColor, truncateMiddle } from './utils';
 
 import styles from '../styles/HDXLineChart.module.scss';
 
@@ -38,14 +38,12 @@ const MAX_LEGEND_ITEMS = 4;
 
 const HDXLineChartTooltip = withErrorBoundary(
   memo((props: any) => {
-    const timeFormat: TimeFormat = useUserPreferences().timeFormat;
-    const tsFormat = TIME_TOKENS[timeFormat];
     const { active, payload, label, numberFormat } = props;
     if (active && payload && payload.length) {
       return (
         <div className={styles.chartTooltip}>
           <div className={styles.chartTooltipHeader}>
-            {format(new Date(label * 1000), tsFormat)}
+            <FormatTime value={label * 1000} />
           </div>
           <div className={styles.chartTooltipContent}>
             {payload
@@ -80,7 +78,7 @@ function CopyableLegendItem({ entry }: any) {
       role="button"
       onClick={() => {
         window.navigator.clipboard.writeText(entry.value);
-        toast.success(`Copied to clipboard`);
+        notifications.show({ color: 'green', message: `Copied to clipboard` });
       }}
       title="Click to expand"
     >
@@ -159,6 +157,7 @@ const MemoChart = memo(function MemoChart({
   dateRange,
   groupKeys,
   lineNames,
+  lineColors,
   alertThreshold,
   alertThresholdType,
   logReferenceTimestamp,
@@ -171,6 +170,7 @@ const MemoChart = memo(function MemoChart({
   dateRange: [Date, Date] | Readonly<[Date, Date]>;
   groupKeys: string[];
   lineNames: string[];
+  lineColors: Array<string | undefined>;
   alertThreshold?: number;
   alertThresholdType?: 'above' | 'below';
   displayType?: 'stacked_bar' | 'line';
@@ -197,7 +197,7 @@ const MemoChart = memo(function MemoChart({
           type="monotone"
           dataKey={key}
           name={lineNames[i] ?? key}
-          fill={semanticKeyedColor(lineNames[i] ?? key)}
+          fill={lineColors[i] ?? semanticKeyedColor(lineNames[i] ?? key)}
           stackId="1"
         />
       ) : (
@@ -206,7 +206,7 @@ const MemoChart = memo(function MemoChart({
           type="monotone"
           dataKey={key}
           name={lineNames[i] ?? key}
-          stroke={semanticKeyedColor(lineNames[i] ?? key)}
+          stroke={lineColors[i] ?? semanticKeyedColor(lineNames[i] ?? key)}
           dot={
             isContinuousGroup[key] === false ? { strokeWidth: 2, r: 1 } : false
           }
@@ -214,12 +214,17 @@ const MemoChart = memo(function MemoChart({
         />
       ),
     );
-  }, [groupKeys, displayType, lineNames, graphResults]);
+  }, [groupKeys, graphResults, displayType, lineNames, lineColors]);
 
   const sizeRef = useRef<[number, number]>([0, 0]);
-  const timeFormat: TimeFormat = useUserPreferences().timeFormat;
-  const tsFormat = TIME_TOKENS[timeFormat];
-  // Gets the preffered time format from User Preferences, then converts it to a formattable token
+
+  const formatTime = useFormatTime();
+  const xTickFormatter = useCallback(
+    (value: number) => {
+      return formatTime(value * 1000);
+    },
+    [formatTime],
+  );
 
   const tickFormatter = useCallback(
     (value: number) =>
@@ -284,7 +289,7 @@ const MemoChart = memo(function MemoChart({
           interval="preserveStartEnd"
           scale="time"
           type="number"
-          tickFormatter={tick => format(new Date(tick * 1000), tsFormat)}
+          tickFormatter={xTickFormatter}
           minTickGap={50}
           tick={{ fontSize: 12, fontFamily: 'IBM Plex Mono, monospace' }}
         />
@@ -402,6 +407,7 @@ const HDXMultiSeriesTimeChart = memo(
       [seriesGroup: string]: {
         dataKey: string;
         displayName: string;
+        color?: string;
       };
     } = {};
 
@@ -436,10 +442,13 @@ const HDXMultiSeriesTimeChart = memo(
                 : // Otherwise, show the series and a group if there is any
                   `${hasGroup ? `${row.group} • ` : ''}${meta.displayName}`;
 
+            const color = meta.color;
+
             acc[dataKey] = row[meta.dataKey];
             lineDataMap[dataKey] = {
               dataKey,
               displayName,
+              color,
             };
             return acc;
           }, {} as any),
@@ -453,6 +462,7 @@ const HDXMultiSeriesTimeChart = memo(
 
     const groupKeys = Object.values(lineDataMap).map(s => s.dataKey);
     const lineNames = Object.values(lineDataMap).map(s => s.displayName);
+    const lineColors = Object.values(lineDataMap).map(s => s.color);
 
     const [activeClickPayload, setActiveClickPayload] = useState<
       | {
@@ -611,6 +621,7 @@ const HDXMultiSeriesTimeChart = memo(
           )}
           <MemoChart
             lineNames={lineNames}
+            lineColors={lineColors}
             graphResults={graphResults}
             groupKeys={groupKeys}
             isClickActive={activeClickPayload}

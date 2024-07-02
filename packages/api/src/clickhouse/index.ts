@@ -1148,22 +1148,57 @@ export const buildMetricSeriesQuery = async ({
 
   const rateMetricSource = SqlString.format(
     `
+    SELECT sum(rate) as rate, ?, _string_attributes, name FROM (
       SELECT
-        if(
-          runningDifference(value) < 0
-          OR neighbor(_string_attributes, -1, _string_attributes) != _string_attributes,
-          nan,
-          runningDifference(value)
-        ) AS rate,
+        any(value) OVER (
+            rows between 1 preceding
+            and 1 preceding
+        ) as prev_data,
+        any(_string_attributes) OVER (
+            rows between 1 preceding
+            and 1 preceding
+        ) as prev_string_attributes,
+        if (
+            value - prev_data < 0 AND _string_attributes = prev_string_attributes,
+            value,
+            if (
+              _string_attributes != prev_string_attributes, 
+              0, 
+              value - prev_data
+            )
+        ) as rate,
+        name,
         timestamp,
-        _string_attributes,
-        name
-      FROM (?)
-      WHERE isNaN(rate) = 0
-      ${shouldModifyStartTime ? 'AND timestamp >= fromUnixTimestamp(?)' : ''}
+        _string_attributes
+      FROM (
+        SELECT _string_attributes, value, name, timestamp
+        FROM ??
+        WHERE name = ?
+        AND data_type = ?
+        AND (?)
+        ORDER BY _string_attributes, timestamp ASC
+        )
+    ) 
+    WHERE
+      ${shouldModifyStartTime ? 'timestamp >= fromUnixTimestamp(?)' : '1=1'}
+    GROUP BY timestamp, name, _string_attributes
     `.trim(),
     [
-      SqlString.raw(gaugeMetricSource),
+      SqlString.raw(
+        granularity != null
+          ? `toStartOfInterval(timestamp, INTERVAL ${SqlString.format(
+              granularity,
+            )}) as timestamp`
+          : modifiedStartTime
+          ? // Manually create the time buckets if we're including the prev time range
+            `if(timestamp < fromUnixTimestamp(${startTimeUnixTs}), 0, ${startTimeUnixTs}) as timestamp`
+          : // Otherwise lump everything into one bucket
+            '0 as timestamp',
+      ),
+      tableName,
+      name,
+      dataType,
+      SqlString.raw(whereClause),
       ...(shouldModifyStartTime ? [Math.floor(startTime / 1000)] : []),
     ],
   );
@@ -1632,6 +1667,11 @@ export const queryMultiSeriesChart = async ({
       ),
     ],
   );
+
+  logger.info({
+    message: 'queryMultiSeriesChart',
+    query,
+  });
 
   const rows = await client.query({
     query,
@@ -2331,12 +2371,30 @@ export const getSessions = async ({
     ],
   );
 
+  // Filter by the rrweb table if there are any recordings for the session
+  // because session_id is the sort key prefix, it'll be a quick lookup operation
+  // Otherwise we'll want to filter on events in case recordings were
+  // disabled but we still have significant span events
+  // Filter by either a record init span, or a visibility span
+  // 1. Record init is emitted on SDK initialization and should only happen
+  // if there is an actual recording being done for the session (ex. no background sessions)
+  // 2. Visibility is needed as sessions are rolled over every 4 hours, and therefore
+  // there isn't always a record init event in every session if the user has been
+  // on a page for longer than 4 hours. We're using the visibility event
+  // as a proxy for a user interacting with the page and likely will have some
+  // recording for the session
   const sessionsWithRecordingsQuery = SqlString.format(
     `WITH sessions AS (${sessionsWithSearchQuery}),
 sessionIdsWithRecordings AS (
+  SELECT DISTINCT session_id as sessionId
+  FROM ??
+  WHERE (session_id IN (SELECT sessions.sessionId FROM sessions))
+    AND (?)
+),
+sessionIdsWithUserActivity AS (
   SELECT DISTINCT _rum_session_id as sessionId
   FROM ??
-  WHERE span_name='record init' 
+  WHERE (span_name='record init' OR span_name='visibility')
     AND (_rum_session_id IN (SELECT sessions.sessionId FROM sessions))
     AND (?)
 )
@@ -2344,8 +2402,12 @@ SELECT *
 FROM sessions 
 WHERE sessions.sessionId IN (
     SELECT sessionIdsWithRecordings.sessionId FROM sessionIdsWithRecordings
+  ) OR sessions.sessionId IN (
+    SELECT sessionIdsWithUserActivity.sessionId FROM sessionIdsWithUserActivity
   )`,
     [
+      `default.${TableName.Rrweb}`,
+      SqlString.raw(SearchQueryBuilder.timestampInBetween(startTime, endTime)),
       tableName,
       SqlString.raw(SearchQueryBuilder.timestampInBetween(startTime, endTime)),
     ],

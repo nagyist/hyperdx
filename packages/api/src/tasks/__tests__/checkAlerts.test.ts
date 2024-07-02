@@ -23,10 +23,9 @@ import {
   buildAlertMessageTemplateTitle,
   buildLogSearchLink,
   doesExceedThreshold,
-  escapeJsonValues,
+  escapeJsonString,
   expandToNestedObject,
   getDefaultExternalAction,
-  injectIntoPlaceholders,
   processAlert,
   renderAlertTemplate,
   roundDownToXMinutes,
@@ -59,61 +58,6 @@ describe('checkAlerts', () => {
     expect(
       roundDownTo5Minutes(new Date('2023-03-17T22:59:59.103Z')).toISOString(),
     ).toBe('2023-03-17T22:55:00.000Z');
-  });
-
-  describe('injectIntoPlaceholders', () => {
-    const message = {
-      hdxLink: 'https://www.example.com/random-testing-url1234',
-      title: 'Alert for "All Events" - 776 lines found',
-      body: '145 lines found, expected less than 1 lines',
-    };
-
-    const valuesToInject = {
-      $HDX_ALERT_URL: message.hdxLink,
-      $HDX_ALERT_TITLE: message.title,
-      $HDX_ALERT_BODY: message.body,
-    };
-
-    it('should correctly inject message values into placeholders', () => {
-      const placeholderString =
-        '{"text":"$HDX_ALERT_URL | $HDX_ALERT_TITLE | $HDX_ALERT_BODY"}';
-      const result = injectIntoPlaceholders(placeholderString, valuesToInject);
-      const expectedObj = {
-        text: `${message.hdxLink} | ${message.title} | ${message.body}`,
-      };
-      const expected = JSON.stringify(expectedObj);
-      expect(result).toEqual(expected);
-    });
-
-    it('should retain invalid placeholders if no matching valid key', () => {
-      const placeholderString =
-        '{"text":"$HDX_ALERT_LINK | $HDX_ALERT_TITLE | $HDX_ALERT_BODY"}';
-      const result = injectIntoPlaceholders(placeholderString, valuesToInject);
-      const expectedObj = {
-        text: `$HDX_ALERT_LINK | ${message.title} | ${message.body}`,
-      };
-      const expected = JSON.stringify(expectedObj);
-      expect(result).toEqual(expected);
-    });
-
-    it('should escape JSON values correctly', () => {
-      const placeholderString = 'escapetest: $HDX_ALERT_BODY';
-      const valuesToInject = {
-        $HDX_ALERT_BODY: '{"key":"value\nnew line"}',
-      };
-      const expected = 'escapetest: {\\"key\\":\\"value\\nnew line\\"}';
-      const result = injectIntoPlaceholders(placeholderString, valuesToInject);
-      expect(result).toEqual(expected);
-    });
-  });
-
-  describe('escapeJsonValues', () => {
-    it('should escape special JSON characters', () => {
-      const input = '"Simple\nEscapeJson"\tTest\\';
-      const expected = '\\"Simple\\nEscapeJson\\"\\tTest\\\\';
-      const result = escapeJsonValues(input);
-      expect(result).toEqual(expected);
-    });
   });
 
   it('buildLogSearchLink', () => {
@@ -186,6 +130,18 @@ describe('checkAlerts', () => {
     });
   });
 
+  it('escapeJsonString', () => {
+    expect(escapeJsonString('foo')).toBe('foo');
+    expect(escapeJsonString("foo'")).toBe("foo'");
+    expect(escapeJsonString('foo"')).toBe('foo\\"');
+    expect(escapeJsonString('foo\\')).toBe('foo\\\\');
+    expect(escapeJsonString('foo\n')).toBe('foo\\n');
+    expect(escapeJsonString('foo\r')).toBe('foo\\r');
+    expect(escapeJsonString('foo\t')).toBe('foo\\t');
+    expect(escapeJsonString('foo\b')).toBe('foo\\b');
+    expect(escapeJsonString('foo\f')).toBe('foo\\f');
+  });
+
   describe('Alert Templates', () => {
     const defaultSearchView: any = {
       alert: {
@@ -241,7 +197,7 @@ describe('checkAlerts', () => {
       await server.start();
     });
 
-    afterEach(async () => {
+    beforeEach(async () => {
       await server.clearDBs();
       jest.clearAllMocks();
     });
@@ -632,8 +588,7 @@ describe('checkAlerts', () => {
       });
 
       expect(slack.postMessageToWebhook).toHaveBeenCalledTimes(2);
-      expect(slack.postMessageToWebhook).toHaveBeenNthCalledWith(
-        1,
+      expect(slack.postMessageToWebhook).toHaveBeenCalledWith(
         'https://hooks.slack.com/services/123',
         {
           text: 'Alert for "My Search" - 10 lines found',
@@ -662,8 +617,7 @@ describe('checkAlerts', () => {
           ],
         },
       );
-      expect(slack.postMessageToWebhook).toHaveBeenNthCalledWith(
-        2,
+      expect(slack.postMessageToWebhook).toHaveBeenCalledWith(
         'https://hooks.slack.com/services/456',
         {
           text: 'Alert for "My Search" - 10 lines found',
@@ -702,7 +656,7 @@ describe('checkAlerts', () => {
       await server.start();
     });
 
-    afterEach(async () => {
+    beforeEach(async () => {
       await server.clearDBs();
       jest.clearAllMocks();
     });
@@ -1042,12 +996,12 @@ describe('checkAlerts', () => {
             { value: 8, timestamp: metricNowTs + ms('1m') },
             { value: 8, timestamp: metricNowTs + ms('2m') },
             { value: 9, timestamp: metricNowTs + ms('3m') },
-            { value: 15, timestamp: metricNowTs + ms('4m') }, // 15
+            { value: 15, timestamp: metricNowTs + ms('4m') }, // 15 (14 rate)
             { value: 30, timestamp: metricNowTs + ms('5m') },
             { value: 31, timestamp: metricNowTs + ms('6m') },
             { value: 32, timestamp: metricNowTs + ms('7m') },
             { value: 33, timestamp: metricNowTs + ms('8m') },
-            { value: 34, timestamp: metricNowTs + ms('9m') }, // 34
+            { value: 34, timestamp: metricNowTs + ms('9m') }, // 34 (19 rate)
             { value: 35, timestamp: metricNowTs + ms('10m') },
             { value: 36, timestamp: metricNowTs + ms('11m') },
           ],
@@ -1073,12 +1027,12 @@ describe('checkAlerts', () => {
             { value: 8000, timestamp: metricNowTs + ms('1m') },
             { value: 8000, timestamp: metricNowTs + ms('2m') },
             { value: 9000, timestamp: metricNowTs + ms('3m') },
-            { value: 15000, timestamp: metricNowTs + ms('4m') }, // 15000
+            { value: 15000, timestamp: metricNowTs + ms('4m') }, // 15000 (14000 rate)
             { value: 30000, timestamp: metricNowTs + ms('5m') },
             { value: 30001, timestamp: metricNowTs + ms('6m') },
             { value: 30002, timestamp: metricNowTs + ms('7m') },
             { value: 30003, timestamp: metricNowTs + ms('8m') },
-            { value: 30004, timestamp: metricNowTs + ms('9m') }, // 30004
+            { value: 30004, timestamp: metricNowTs + ms('9m') }, // 30004 (15004 rate)
             { value: 30005, timestamp: metricNowTs + ms('10m') },
             { value: 30006, timestamp: metricNowTs + ms('11m') },
           ],
@@ -1099,12 +1053,12 @@ describe('checkAlerts', () => {
             { value: 8, timestamp: metricNowTs + ms('1m') },
             { value: 8, timestamp: metricNowTs + ms('2m') },
             { value: 9, timestamp: metricNowTs + ms('3m') },
-            { value: 15, timestamp: metricNowTs + ms('4m') }, // 15
+            { value: 15, timestamp: metricNowTs + ms('4m') }, // 15 (14 rate)
             { value: 17, timestamp: metricNowTs + ms('5m') },
             { value: 18, timestamp: metricNowTs + ms('6m') },
             { value: 19, timestamp: metricNowTs + ms('7m') },
             { value: 20, timestamp: metricNowTs + ms('8m') },
-            { value: 21, timestamp: metricNowTs + ms('9m') }, // 21
+            { value: 21, timestamp: metricNowTs + ms('9m') }, // 21 (6 rate)
             { value: 22, timestamp: metricNowTs + ms('10m') },
             { value: 23, timestamp: metricNowTs + ms('11m') },
           ],
@@ -1284,7 +1238,9 @@ describe('checkAlerts', () => {
         url: 'https://webhook.site/123',
         name: 'Generic Webhook',
         description: 'generic webhook description',
-        body: { text: '$HDX_ALERT_URL | $HDX_ALERT_TITLE' },
+        body: JSON.stringify({
+          text: '{{link}} | {{title}}',
+        }),
         headers: {
           'Content-Type': 'application/json',
           'X-HyperDX-Signature': 'XXXXX-XXXXX',
@@ -1349,19 +1305,16 @@ describe('checkAlerts', () => {
         windowSizeInMins: 5,
       });
       // check if generic webhook was triggered, injected, and parsed, and sent correctly
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://webhook.site/123',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            text: `http://localhost:9090/search/${logView._id}?from=1700172600000&to=1700172900000&q=level%3Aerror+span_name%3A%22HyperDX%22 | Alert for "My Log View" - 11 lines found`,
-          }),
-          headers: {
-            'Content-Type': 'application/json',
-            'X-HyperDX-Signature': 'XXXXX-XXXXX',
-          },
+      expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://webhook.site/123', {
+        method: 'POST',
+        body: JSON.stringify({
+          text: `http://localhost:9090/search/${logView.id}?from=1700172600000&to=1700172900000&q=level%3Aerror+span_name%3A%22HyperDX%22 | Alert for "My Log View" - 11 lines found`,
         }),
-      );
+        headers: {
+          'Content-Type': 'application/json',
+          'X-HyperDX-Signature': 'XXXXX-XXXXX',
+        },
+      });
     });
 
     it('CHART alert (logs table series) - generic webhook', async () => {
@@ -1405,7 +1358,9 @@ describe('checkAlerts', () => {
         url: 'https://webhook.site/123',
         name: 'Generic Webhook',
         description: 'generic webhook description',
-        body: { text: '$HDX_ALERT_URL | $HDX_ALERT_TITLE' },
+        body: JSON.stringify({
+          text: '{{link}} | {{title}}',
+        }),
         headers: { 'Content-Type': 'application/json' },
       }).save();
       const dashboard = await new Dashboard({
@@ -1508,18 +1463,15 @@ describe('checkAlerts', () => {
       expect(history2.createdAt).toEqual(new Date('2023-11-16T22:15:00.000Z'));
 
       // check if generic webhook was triggered, injected, and parsed, and sent correctly
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://webhook.site/123',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            text: `http://localhost:9090/dashboards/${dashboard._id}?from=1700170200000&granularity=5+minute&to=1700174700000 | Alert for "Max Duration" in "My Dashboard" - 102 exceeds 10`,
-          }),
-          headers: {
-            'Content-Type': 'application/json',
-          },
+      expect(fetchMock).toHaveBeenCalledWith('https://webhook.site/123', {
+        method: 'POST',
+        body: JSON.stringify({
+          text: `http://localhost:9090/dashboards/${dashboard.id}?from=1700170200000&granularity=5+minute&to=1700174700000 | Alert for "Max Duration" in "My Dashboard" - 102 exceeds 10`,
         }),
-      );
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
     });
 
     it('CHART alert (metrics table series) - generic webhook', async () => {
@@ -1637,7 +1589,9 @@ describe('checkAlerts', () => {
         url: 'https://webhook.site/123',
         name: 'Generic Webhook',
         description: 'generic webhook description',
-        body: { text: '$HDX_ALERT_URL | $HDX_ALERT_TITLE' },
+        body: JSON.stringify({
+          text: '{{link}} | {{title}}',
+        }),
         headers: { 'Content-Type': 'application/json' },
       }).save();
       const dashboard = await new Dashboard({
@@ -1738,18 +1692,15 @@ describe('checkAlerts', () => {
       );
 
       // check if generic webhook was triggered, injected, and parsed, and sent correctly
-      expect(fetchMock).toHaveBeenCalledWith(
-        'https://webhook.site/123',
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify({
-            text: `http://localhost:9090/dashboards/${dashboard._id}?from=1700170200000&granularity=5+minute&to=1700174700000 | Alert for "Redis Memory" in "My Dashboard" - 395.3421052631579 exceeds 10`,
-          }),
-          headers: {
-            'Content-Type': 'application/json',
-          },
+      expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://webhook.site/123', {
+        method: 'POST',
+        body: JSON.stringify({
+          text: `http://localhost:9090/dashboards/${dashboard.id}?from=1700170200000&granularity=5+minute&to=1700174700000 | Alert for "Redis Memory" in "My Dashboard" - 395.3421052631579 exceeds 10`,
         }),
-      );
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
       jest.resetAllMocks();
     });

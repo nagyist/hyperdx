@@ -13,6 +13,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 
+import { ColorSwatchInput } from './components/ColorSwatchInput';
 import { NumberFormatInput } from './components/NumberFormat';
 import { intervalToGranularity } from './Alert';
 import {
@@ -27,7 +28,6 @@ import {
 } from './ChartUtils';
 import Checkbox from './Checkbox';
 import * as config from './config';
-import { METRIC_ALERTS_ENABLED } from './config';
 import EditChartFormAlerts from './EditChartFormAlerts';
 import GranularityPicker from './GranularityPicker';
 import HDXHistogramChart from './HDXHistogramChart';
@@ -330,8 +330,6 @@ export const EditSearchChartForm = ({
               where: previewConfig.where,
             }}
             isLive={false}
-            isUTC={false}
-            setIsUTC={() => {}}
             onPropertySearchClick={() => {}}
           />
         </div>
@@ -487,8 +485,6 @@ export const EditNumberChartForm = ({
                   }`,
                 }}
                 isLive={false}
-                isUTC={false}
-                setIsUTC={() => {}}
                 onPropertySearchClick={() => {}}
               />
             </div>
@@ -692,8 +688,6 @@ export const EditTableChartForm = ({
                   }`,
                 }}
                 isLive={false}
-                isUTC={false}
-                setIsUTC={() => {}}
                 onPropertySearchClick={() => {}}
               />
             </div>
@@ -888,8 +882,6 @@ export const EditHistogramChartForm = ({
                   }`,
                 }}
                 isLive={false}
-                isUTC={false}
-                setIsUTC={() => {}}
                 onPropertySearchClick={() => {}}
               />
             </div>
@@ -963,7 +955,23 @@ export const EditMultiSeriesChartForm = ({
           <div className="mb-2" key={i}>
             <Divider
               label={
-                <>
+                <Group gap="xs">
+                  {editedChart.seriesReturnType === 'column' && (
+                    <ColorSwatchInput
+                      value={series.color}
+                      onChange={(color?: string) => {
+                        setEditedChart(
+                          produce(editedChart, draft => {
+                            const draftSeries = draft.series[i];
+                            if (draftSeries.type === chartType) {
+                              draftSeries.color = color;
+                            }
+                          }),
+                        );
+                      }}
+                    />
+                  )}
+
                   {editedChart.series.length > 1 && (
                     <Button
                       variant="subtle"
@@ -984,7 +992,7 @@ export const EditMultiSeriesChartForm = ({
                       Remove {series.type === 'number' ? 'Ratio' : 'Series'}
                     </Button>
                   )}
-                </>
+                </Group>
               }
               c="dark.2"
               labelPosition="right"
@@ -1274,7 +1282,8 @@ export const EditLineChartForm = ({
 
   const isChartAlertsFeatureEnabled =
     alerts != null &&
-    (_editedChart.series[0].table === 'logs' || METRIC_ALERTS_ENABLED);
+    ((_editedChart.series[0].table ?? 'logs') === 'logs' ||
+      _editedChart.series[0].table === 'metrics');
 
   return (
     <form
@@ -1426,8 +1435,6 @@ export const EditLineChartForm = ({
                   })}`,
                 }}
                 isLive={false}
-                isUTC={false}
-                setIsUTC={() => {}}
                 onPropertySearchClick={() => {}}
               />
             </div>

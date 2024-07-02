@@ -17,7 +17,6 @@ import { ErrorBoundary } from 'react-error-boundary';
 import RGL, { WidthProvider } from 'react-grid-layout';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useQueryClient } from 'react-query';
-import { toast } from 'react-toastify';
 import {
   JsonParam,
   StringParam,
@@ -39,6 +38,7 @@ import {
   Tooltip,
   Transition,
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 
 import api from './api';
 import { convertDateRangeToGranularityString, Granularity } from './ChartUtils';
@@ -79,6 +79,53 @@ const buildAndWhereClause = (query1: string, query2: string) => {
   } else {
     return `${query1} (${query2})`;
   }
+};
+
+const useConfirmExit = ({
+  hasUnsavedChanges,
+}: {
+  hasUnsavedChanges?: boolean;
+}) => {
+  const router = useRouter();
+
+  const handleBeforeUnload = useCallback(
+    (e: BeforeUnloadEvent) => {
+      if (!hasUnsavedChanges) {
+        return;
+      }
+      e.preventDefault();
+      e.returnValue = '';
+    },
+    [hasUnsavedChanges],
+  );
+
+  const handleRouteChangeStart = useCallback(
+    (route: string) => {
+      if (!hasUnsavedChanges || route.startsWith('/dashboards')) {
+        return;
+      }
+      if (
+        window.confirm(
+          'You have unsaved changes. Are you sure you want to leave?',
+        )
+      ) {
+        return;
+      }
+      router.events.emit('routeChangeError');
+      throw 'aborted';
+    },
+    [hasUnsavedChanges, router.events],
+  );
+
+  useEffect(() => {
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    router.events.on('routeChangeStart', handleRouteChangeStart);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      router.events.off('routeChangeStart', handleRouteChangeStart);
+    };
+  }, [handleBeforeUnload, handleRouteChangeStart, router.events]);
 };
 
 const Tile = forwardRef(
@@ -351,8 +398,6 @@ const Tile = forwardRef(
                   <LogTableWithSidePanel
                     config={config}
                     isLive={false}
-                    isUTC={false}
-                    setIsUTC={() => {}}
                     onPropertySearchClick={() => {}}
                     onSettled={onSettled}
                   />
@@ -570,7 +615,12 @@ function DashboardFilter({
 
 // TODO: This is a hack to set the default time range
 const defaultTimeRange = parseTimeQuery('Past 1h', false) as [Date, Date];
-export default function DashboardPage() {
+
+export default function DashboardPage({
+  presetConfig,
+}: {
+  presetConfig?: Dashboard;
+}) {
   const { data: dashboardsData, isLoading: isDashboardsLoading } =
     api.useDashboards();
   const { data: meData } = api.useMe();
@@ -580,7 +630,9 @@ export default function DashboardPage() {
   const deleteAlert = api.useDeleteAlert();
   const updateAlert = api.useUpdateAlert();
   const router = useRouter();
+
   const { dashboardId, config } = router.query;
+
   const queryClient = useQueryClient();
 
   const confirm = useConfirm();
@@ -602,6 +654,9 @@ export default function DashboardPage() {
     dashboardId != null ? dashboardId : hashCode(`${config}`);
 
   const dashboard: Dashboard | undefined = useMemo(() => {
+    if (presetConfig) {
+      return presetConfig;
+    }
     if (isLocalDashboard) {
       return localDashboard;
     }
@@ -611,7 +666,13 @@ export default function DashboardPage() {
       );
       return matchedDashboard;
     }
-  }, [dashboardsData, dashboardId, isLocalDashboard, localDashboard]);
+  }, [
+    presetConfig,
+    isLocalDashboard,
+    dashboardsData,
+    localDashboard,
+    dashboardId,
+  ]);
 
   // Update dashboard
   const [isSavedNow, _setSavedNow] = useState(false);
@@ -692,7 +753,6 @@ export default function DashboardPage() {
 
   const { searchedTimeRange, displayedTimeInputValue, onSearch } =
     useNewTimeQuery({
-      isUTC: false,
       initialDisplayValue: 'Past 1h',
       initialTimeRange: defaultTimeRange,
     });
@@ -730,6 +790,13 @@ export default function DashboardPage() {
       onAddChart();
     }
   }, [isLocalDashboard, router, dashboard?.charts.length]);
+
+  useConfirmExit({
+    hasUnsavedChanges:
+      isLocalDashboard &&
+      (dashboard?.charts.length || 0) > 0 &&
+      presetConfig == null,
+  });
 
   const [highlightedChartId] = useQueryParam('highlightedChartId');
 
@@ -830,7 +897,10 @@ export default function DashboardPage() {
             {
               onError: err => {
                 console.error(err);
-                toast.error('Failed to update alert.');
+                notifications.show({
+                  color: 'red',
+                  message: 'Failed to update alert.',
+                });
               },
             },
           );
@@ -838,7 +908,10 @@ export default function DashboardPage() {
           deleteAlert.mutate(editedChartAlert._id, {
             onError: err => {
               console.error(err);
-              toast.error('Failed to delete alert.');
+              notifications.show({
+                color: 'red',
+                message: 'Failed to delete alert.',
+              });
             },
           });
         }
@@ -853,7 +926,10 @@ export default function DashboardPage() {
           {
             onError: err => {
               console.error(err);
-              toast.error('Failed to save alert.');
+              notifications.show({
+                color: 'red',
+                message: 'Failed to save alert.',
+              });
             },
           },
         );
@@ -1165,7 +1241,10 @@ export default function DashboardPage() {
                   },
                   () => {
                     setSearchedQuery(undefined);
-                    toast.success('Dashboard filter saved and applied.');
+                    notifications.show({
+                      color: 'green',
+                      message: 'Dashboard filter saved and applied.',
+                    });
                   },
                 );
               }}

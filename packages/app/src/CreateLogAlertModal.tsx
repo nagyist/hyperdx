@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Form, Modal } from 'react-bootstrap';
 import { Controller, useForm } from 'react-hook-form';
-import { toast } from 'react-toastify';
+import { notifications } from '@mantine/notifications';
 
 import {
   ALERT_CHANNEL_OPTIONS,
@@ -52,8 +52,6 @@ function AlertForm({
   onDeleteClick: () => void;
   query: string;
 }) {
-  const { data: team } = api.useTeam();
-
   const {
     register,
     handleSubmit,
@@ -105,10 +103,10 @@ function AlertForm({
         <div className="me-2 mb-2">
           <Form.Select id="type" size="sm" {...register('type')}>
             <option key="presence" value="presence">
-              more than
+              at least (≥)
             </option>
             <option key="absence" value="absence">
-              less than
+              less than ({'<'})
             </option>
           </Form.Select>
         </div>
@@ -233,9 +231,11 @@ export default function CreateLogAlertModal({
           setSelectedAlertId(alerts?.[0]?._id);
         },
         onError: () => {
-          toast.error(
-            'An error occurred. Please contact support for more details.',
-          );
+          notifications.show({
+            color: 'red',
+            message:
+              'An error occurred. Please contact support for more details.',
+          });
         },
       });
     }
@@ -316,9 +316,11 @@ export default function CreateLogAlertModal({
                     displayedSavedSearchName == null ||
                     displayedSavedSearchName.length === 0
                   ) {
-                    toast.error(
-                      'You must enter a saved search name to create an alert.',
-                    );
+                    notifications.show({
+                      color: 'red',
+                      message:
+                        'You must enter a saved search name to create an alert.',
+                    });
                     return;
                   }
                   const savedSearch = await saveLogView.mutateAsync({
@@ -328,9 +330,11 @@ export default function CreateLogAlertModal({
                   savedSearchId = savedSearch.data._id;
                   onSavedSearchCreateSuccess(savedSearch.data);
                 } catch (e) {
-                  toast.error(
-                    'An error occurred while saving the search for this alert. Please contact support for more details.',
-                  );
+                  notifications.show({
+                    color: 'red',
+                    message:
+                      'An error occurred while saving the search for this alert. Please contact support for more details.',
+                  });
                   return;
                 }
               }
@@ -356,16 +360,20 @@ export default function CreateLogAlertModal({
                       onSaveSuccess();
                     },
                     onError: () => {
-                      toast.error(
-                        'An error occurred. Please contact support for more details.',
-                      );
+                      notifications.show({
+                        color: 'red',
+                        message:
+                          'An error occurred. Please contact support for more details.',
+                      });
                     },
                   },
                 );
               } else {
-                toast.error(
-                  'An error occurred while saving the search for this alert. Please contact support for more details.',
-                );
+                notifications.show({
+                  color: 'red',
+                  message:
+                    'An error occurred while saving the search for this alert. Please contact support for more details.',
+                });
               }
             }}
             alertId={undefined}
@@ -405,13 +413,15 @@ export default function CreateLogAlertModal({
                   {
                     onSuccess: response => {
                       onSaveSuccess();
-                      // toast.success('The alert is saved.');
+                      // notifications.show({ color: 'green', message: 'The alert is saved.' });
                       // refetchLogViews();
                     },
                     onError: () => {
-                      toast.error(
-                        'An error occurred. Please contact support for more details.',
-                      );
+                      notifications.show({
+                        color: 'red',
+                        message:
+                          'An error occurred. Please contact support for more details.',
+                      });
                     },
                   },
                 );

@@ -1,10 +1,10 @@
 {
-  "editor.formatOnSave.eslint": true,
+  "editor.formatOnSave": true,
   "[typescript]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
+    "editor.defaultFormatter": "dbaeumer.vscode-eslint"
   },
   "[typescriptreact]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
+    "editor.defaultFormatter": "dbaeumer.vscode-eslint"
   },
   "cssVariables.lookupFiles": [
     "**/*.css",
@@ -12,5 +12,14 @@
     "**/*.sass",
     "**/*.less",
     "node_modules/@mantine/core/styles.css"
-  ]
+  ],
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/bower_components": true,
+    "**/*.code-search": true,
+    "**/*.map": true,
+    "**/yarn.lock": true,
+    "**/package.json": true,
+    "**/yarn-*.cjs": true
+  }
 }

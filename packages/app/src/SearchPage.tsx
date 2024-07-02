@@ -11,12 +11,10 @@ import dynamic from 'next/dynamic';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { clamp, format, sub } from 'date-fns';
-import { formatInTimeZone } from 'date-fns-tz';
+import cx from 'classnames';
+import { clamp, sub } from 'date-fns';
 import { Button } from 'react-bootstrap';
-import { ErrorBoundary } from 'react-error-boundary';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { toast } from 'react-toastify';
 import {
   Bar,
   BarChart,
@@ -33,7 +31,9 @@ import {
   withDefault,
 } from 'use-query-params';
 import { ActionIcon, Indicator } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 
+import { ErrorBoundary } from './components/ErrorBoundary';
 import api from './api';
 import CreateLogAlertModal from './CreateLogAlertModal';
 import { withAppNav } from './layout';
@@ -42,35 +42,24 @@ import LogTable from './LogTable';
 import { MemoPatternTableWithSidePanel } from './PatternTableWithSidePanel';
 import SaveSearchModal from './SaveSearchModal';
 import SearchInput from './SearchInput';
+import { SearchPageFilters, ToggleFilterButton } from './SearchPage.components';
 import SearchPageActionBar from './SearchPageActionBar';
 import SearchTimeRangePicker from './SearchTimeRangePicker';
 import { Tags } from './Tags';
 import { useTimeQuery } from './timeQuery';
 import { useDisplayedColumns } from './useDisplayedColumns';
+import { FormatTime, useFormatTime } from './useFormatTime';
 
 import 'react-modern-drawer/dist/index.css';
-
-const formatDate = (
-  date: Date,
-  isUTC: boolean,
-  strFormat = 'MMM d HH:mm:ss',
-) => {
-  return isUTC
-    ? formatInTimeZone(date, 'Etc/UTC', strFormat)
-    : format(date, strFormat);
-};
-const dateRangeToString = (range: [Date, Date], isUTC: boolean) => {
-  return `${formatDate(range[0], isUTC)} - ${formatDate(range[1], isUTC)}`;
-};
+import styles from '../styles/SearchPage.module.scss';
 
 const HistogramBarChartTooltip = (props: any) => {
-  const tsFormat = 'MMM d HH:mm:ss.SSS';
   const { active, payload, label } = props;
   if (active && payload && payload.length) {
     return (
       <div className="bg-grey px-3 py-2 rounded fs-8">
         <div className="mb-2">
-          {formatDate(new Date(label * 1000), props.isUTC, tsFormat)}
+          <FormatTime value={label * 1000} format="withMs" />
         </div>
         {payload.map((p: any) => (
           <div key={p.name} style={{ color: p.color }}>
@@ -88,7 +77,6 @@ const HDXHistogram = memo(
     config: { dateRange, where },
     onTimeRangeSelect,
     isLive,
-    isUTC,
   }: {
     config: {
       dateRange: [Date, Date];
@@ -96,7 +84,6 @@ const HDXHistogram = memo(
     };
     onTimeRangeSelect: (start: Date, end: Date) => void;
     isLive: boolean;
-    isUTC: boolean;
   }) => {
     const { data: histogramResults, isLoading: isHistogramResultsLoading } =
       api.useLogHistogram(
@@ -127,6 +114,8 @@ const HDXHistogram = memo(
 
     const [highlightStart, setHighlightStart] = useState<string | undefined>();
     const [highlightEnd, setHighlightEnd] = useState<string | undefined>();
+
+    const formatTime = useFormatTime();
 
     return isHistogramResultsLoading ? (
       <div className="w-100 h-100 d-flex align-items-center justify-content-center">
@@ -197,9 +186,7 @@ const HDXHistogram = memo(
             interval="preserveStartEnd"
             scale="time"
             type="number"
-            tickFormatter={tick =>
-              formatDate(new Date(tick * 1000), isUTC, 'MMM d HH:mm')
-            }
+            tickFormatter={tick => formatTime(tick * 1000, { format: 'short' })}
             minTickGap={50}
             tick={{ fontSize: 12, fontFamily: 'IBM Plex Mono, monospace' }}
           />
@@ -214,7 +201,7 @@ const HDXHistogram = memo(
             }
             tick={{ fontSize: 12, fontFamily: 'IBM Plex Mono, monospace' }}
           />
-          <Tooltip content={<HistogramBarChartTooltip isUTC={isUTC} />} />
+          <Tooltip content={<HistogramBarChartTooltip />} />
           <Bar dataKey="info" stackId="a" fill="#50FA7B" maxBarSize={24} />
           <Bar dataKey="error" stackId="a" fill="#FF5D5B" maxBarSize={24} />
           {highlightStart && highlightEnd ? (
@@ -270,8 +257,6 @@ const LogViewerContainer = memo(function LogViewerContainer({
   generateChartUrl,
   isLive,
   setIsLive,
-  isUTC,
-  setIsUTC,
   onShowPatternsClick,
 }: {
   config: {
@@ -291,8 +276,6 @@ const LogViewerContainer = memo(function LogViewerContainer({
   onPropertyAddClick: (name: string, value: string | boolean | number) => void;
   isLive: boolean;
   setIsLive: (isLive: boolean) => void;
-  isUTC: boolean;
-  setIsUTC: (isUTC: boolean) => void;
   onShowPatternsClick: () => void;
 }) {
   const [openedLogQuery, setOpenedLogQuery] = useQueryParams(
@@ -332,17 +315,7 @@ const LogViewerContainer = memo(function LogViewerContainer({
 
   return (
     <>
-      <ErrorBoundary
-        onError={err => {
-          console.error(err);
-        }}
-        fallbackRender={() => (
-          <div className="text-danger px-2 py-1 m-2 fs-7 font-monospace bg-danger-transparent">
-            An error occurred while rendering the event details. Contact support
-            for more help.
-          </div>
-        )}
-      >
+      <ErrorBoundary message="An error occurred while rendering the event details. Contact support for more help.">
         <LogSidePanel
           key={openedLog?.id}
           logId={openedLog?.id}
@@ -355,12 +328,12 @@ const LogViewerContainer = memo(function LogViewerContainer({
           generateChartUrl={generateChartUrl}
           displayedColumns={displayedColumns}
           toggleColumn={toggleColumn}
+          shareUrl={window.location.href}
         />
       </ErrorBoundary>
       <LogTable
         tableId="search-table"
         isLive={isLive}
-        setIsUTC={setIsUTC}
         onScroll={useCallback(
           (scrollTop: number) => {
             // If the user scrolls a bit down, kick out of live mode
@@ -373,7 +346,6 @@ const LogViewerContainer = memo(function LogViewerContainer({
         highlightedLineId={openedLog?.id}
         config={config}
         onPropertySearchClick={onPropertySearchClick}
-        formatUTC={isUTC}
         onRowExpandClick={useCallback(
           (id: string, sortKey: string) => {
             setOpenedLog({ id, sortKey });
@@ -397,7 +369,6 @@ function SearchPage() {
     'search',
   );
 
-  const [isUTC, setIsUTC] = useState(false);
   const {
     isReady,
     isLive,
@@ -407,7 +378,7 @@ function SearchPage() {
     onSearch,
     setIsLive,
     onTimeRangeSelect,
-  } = useTimeQuery({ isUTC });
+  } = useTimeQuery({});
 
   const [isFirstLoad, setIsFirstLoad] = useState(true);
   useEffect(() => {
@@ -460,7 +431,9 @@ function SearchPage() {
     [searchInput],
   );
 
-  const [showSaveSearchModal, setShowSaveSearchModal] = useState(false);
+  const [saveSearchModalMode, setSaveSearchModalMode] = useState<
+    'update' | 'save' | 'hidden'
+  >('hidden');
   const [configAlertModalShow, setConfigAlertModalShow] = useState(false);
   const deleteLogView = api.useDeleteLogView();
   const updateLogView = api.useUpdateLogView();
@@ -480,30 +453,42 @@ function SearchPage() {
     }
   }, [selectedSavedSearch, setSearchedQuery, _searchedQuery]);
 
+  const isArcBrowser =
+    typeof window !== 'undefined' &&
+    window
+      .getComputedStyle?.(document.documentElement)
+      .getPropertyValue('--arc-palette-title');
+
   useHotkeys(
-    ['ctrl+s', 'meta+s'],
+    // Arc Browser uses CMD+S for toggling sidebar which conflicts with save search
+    isArcBrowser ? ['ctrl+shift+s', 'meta+shift+s'] : ['ctrl+s', 'meta+s'],
     () => {
-      setShowSaveSearchModal(true);
+      setSaveSearchModalMode('save');
     },
     {
       preventDefault: true,
       enableOnFormTags: true,
     },
-    [setShowSaveSearchModal],
+    [setSaveSearchModalMode],
   );
 
   const onClickDeleteLogView = () => {
     if (selectedSavedSearch?._id) {
       deleteLogView.mutate(selectedSavedSearch._id, {
         onSuccess: () => {
-          toast.success('Saved search deleted.');
+          notifications.show({
+            color: 'green',
+            message: 'Saved search deleted.',
+          });
           router.push(`/search`);
           refetchLogViews();
         },
         onError: () => {
-          toast.error(
-            'An error occured. Please contact support for more details.',
-          );
+          notifications.show({
+            color: 'red',
+            message:
+              'An error occurred. Please contact support for more details.',
+          });
         },
       });
     }
@@ -515,13 +500,18 @@ function SearchPage() {
         { id: selectedSavedSearch._id, query: displayedSearchQuery },
         {
           onSuccess: () => {
-            toast.success('Saved search updated.');
+            notifications.show({
+              color: 'green',
+              message: 'Saved search updated.',
+            });
             refetchLogViews();
           },
           onError: () => {
-            toast.error(
-              'An error occured. Please contact support for more details.',
-            );
+            notifications.show({
+              color: 'red',
+              message:
+                'An error occurred. Please contact support for more details.',
+            });
           },
         },
       );
@@ -544,6 +534,7 @@ function SearchPage() {
     [setDisplayedSearchQuery, doSearch, displayedTimeInputValue],
   );
 
+  const formatTime = useFormatTime();
   const generateSearchUrl = useCallback(
     (newQuery?: string, newTimeRange?: [Date, Date], lid?: string) => {
       const fromDate = newTimeRange ? newTimeRange[0] : searchedTimeRange[0];
@@ -552,14 +543,14 @@ function SearchPage() {
         q: newQuery ?? searchedQuery,
         from: fromDate.getTime().toString(),
         to: toDate.getTime().toString(),
-        tq: dateRangeToString([fromDate, toDate], isUTC),
+        tq: `${formatTime(fromDate)} - ${formatTime(toDate)}`,
         ...(lid ? { lid } : {}),
       });
       return `/search${
         selectedSavedSearch != null ? `/${selectedSavedSearch._id}` : ''
       }?${qparams.toString()}`;
     },
-    [searchedQuery, searchedTimeRange, selectedSavedSearch, isUTC],
+    [searchedQuery, searchedTimeRange, selectedSavedSearch, formatTime],
   );
 
   const generateChartUrl = useCallback(
@@ -661,9 +652,11 @@ function SearchPage() {
               refetchLogViews();
             },
             onError: () => {
-              toast.error(
-                'An error occured. Please contact support for more details.',
-              );
+              notifications.show({
+                color: 'red',
+                message:
+                  'An error occurred. Please contact support for more details.',
+              });
             },
           },
         );
@@ -678,17 +671,31 @@ function SearchPage() {
   );
   const tagsCount = selectedSavedSearch?.tags?.length || 0;
 
+  const handleSearchQueryChange = useCallback(
+    (newQuery: string) => {
+      if (newQuery !== displayedSearchQuery) {
+        doSearch(newQuery, displayedTimeInputValue);
+      }
+    },
+    [displayedSearchQuery, displayedTimeInputValue, doSearch],
+  );
+
   return (
     <div style={{ height: '100vh' }}>
       <Head>
         <title>Search - HyperDX</title>
       </Head>
       <SaveSearchModal
-        show={showSaveSearchModal}
-        onHide={() => setShowSaveSearchModal(false)}
+        mode={saveSearchModalMode}
+        onHide={() => setSaveSearchModalMode('hidden')}
         searchQuery={displayedSearchQuery}
+        searchName={selectedSavedSearch?.name ?? ''}
+        searchID={selectedSavedSearch?._id ?? ''}
         onSaveSuccess={responseData => {
-          toast.success('Saved search created');
+          notifications.show({
+            color: 'green',
+            message: 'Saved search created',
+          });
           router.push(
             `/search/${responseData._id}?${new URLSearchParams({
               q: searchedQuery,
@@ -701,7 +708,15 @@ function SearchPage() {
             }).toString()}`,
           );
           refetchLogViews();
-          setShowSaveSearchModal(false);
+          setSaveSearchModalMode('hidden');
+        }}
+        onUpdateSuccess={responseData => {
+          notifications.show({
+            color: 'green',
+            message: 'Saved search renamed',
+          });
+          refetchLogViews();
+          setSaveSearchModalMode('hidden');
         }}
       />
       <CreateLogAlertModal
@@ -710,11 +725,17 @@ function SearchPage() {
         savedSearch={selectedSavedSearch}
         query={selectedSavedSearch?.query ?? displayedSearchQuery}
         onSaveSuccess={() => {
-          toast.success('Alerts updated successfully.');
+          notifications.show({
+            color: 'green',
+            message: 'Alerts updated successfully.',
+          });
           refetchLogViews();
         }}
         onDeleteSuccess={() => {
-          toast.success('Alert deleted successfully.');
+          notifications.show({
+            color: 'green',
+            message: 'Alert deleted successfully.',
+          });
           refetchLogViews();
         }}
         onSavedSearchCreateSuccess={responseData => {
@@ -732,8 +753,14 @@ function SearchPage() {
           refetchLogViews();
         }}
       />
-      <div className="d-flex flex-column flex-grow-1 bg-hdx-dark h-100">
-        <div className="bg-body pb-3 pt-3 d-flex px-3 align-items-center">
+      <div className="d-flex flex-column flex-grow-0 min-h-0 h-100 bg-hdx-dark">
+        <div
+          className="bg-body pb-3 pt-3 d-flex px-3 align-items-center"
+          style={{
+            borderBottom: '1px solid var(--mantine-color-gray-9)',
+          }}
+        >
+          <ToggleFilterButton />
           <form onSubmit={onSearchSubmit} className="d-flex flex-grow-1">
             <SearchInput
               inputRef={searchInput}
@@ -770,14 +797,18 @@ function SearchPage() {
               }}
             />
           </form>
+
           <SearchPageActionBar
             key={`${savedSearchId}`}
             onClickConfigAlert={onClickConfigAlert}
             onClickDeleteLogView={onClickDeleteLogView}
             onClickUpdateLogView={onClickUpdateLogView}
             selectedLogView={selectedSavedSearch}
+            onClickRenameSearch={() => {
+              setSaveSearchModalMode('update');
+            }}
             onClickSaveSearch={() => {
-              setShowSaveSearchModal(true);
+              setSaveSearchModalMode('save');
             }}
           />
           {!!selectedSavedSearch && (
@@ -800,117 +831,141 @@ function SearchPage() {
             </Tags>
           )}
         </div>
-        <div className="d-flex mx-4 mt-2 justify-content-between">
-          <div className="fs-8 text-muted">
-            {isReady ? (
-              <HistogramResultCounter
-                config={{
-                  where: searchedQuery,
-                  dateRange: [
-                    searchedTimeRange[0] ?? new Date(),
-                    searchedTimeRange[1] ?? new Date(),
-                  ],
+        <div
+          className="d-flex flex-row flex-grow-0"
+          style={{
+            minHeight: 0,
+            height: '100%',
+          }}
+        >
+          <ErrorBoundary message="Unable to render search filters">
+            <SearchPageFilters
+              searchQuery={searchedQuery}
+              onSearchQueryChange={handleSearchQueryChange}
+            />
+          </ErrorBoundary>
+          <div className="d-flex flex-column flex-grow-1">
+            <div className="d-flex mx-4 mt-2 justify-content-between">
+              <div className="fs-8 text-muted">
+                {isReady ? (
+                  <HistogramResultCounter
+                    config={{
+                      where: searchedQuery,
+                      dateRange: [
+                        searchedTimeRange[0] ?? new Date(),
+                        searchedTimeRange[1] ?? new Date(),
+                      ],
+                    }}
+                  />
+                ) : null}
+              </div>
+              <div className="d-flex">
+                <Link
+                  href={generateSearchUrl(searchedQuery, [
+                    zoomOutFrom,
+                    zoomOutTo,
+                  ])}
+                  className="text-muted-hover text-decoration-none fs-8 me-3"
+                >
+                  <i className="bi bi-zoom-out me-1"></i>Zoom Out
+                </Link>
+                <Link
+                  href={generateSearchUrl(searchedQuery, [
+                    zoomInFrom,
+                    zoomInTo,
+                  ])}
+                  className="text-muted-hover text-decoration-none fs-8 me-3"
+                >
+                  <i className="bi bi-zoom-in me-1"></i>Zoom In
+                </Link>
+                <Link
+                  href={generateChartUrl({
+                    table: 'logs',
+                    aggFn: 'count',
+                    field: undefined,
+                    groupBy: ['level'],
+                  })}
+                  className="text-muted-hover text-decoration-none fs-8"
+                >
+                  <i className="bi bi-plus-circle me-1"></i>Create Chart
+                </Link>
+              </div>
+            </div>
+            <div style={{ height: 110 }} className="my-2 px-3 w-100">
+              {/* Hack, recharts will release real fix soon https://github.com/recharts/recharts/issues/172 */}
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  paddingBottom: '110px',
                 }}
-              />
-            ) : null}
-          </div>
-          <div className="d-flex">
-            <Link
-              href={generateSearchUrl(searchedQuery, [zoomOutFrom, zoomOutTo])}
-              className="text-muted-hover text-decoration-none fs-8 me-3"
-            >
-              <i className="bi bi-zoom-out me-1"></i>Zoom Out
-            </Link>
-            <Link
-              href={generateSearchUrl(searchedQuery, [zoomInFrom, zoomInTo])}
-              className="text-muted-hover text-decoration-none fs-8 me-3"
-            >
-              <i className="bi bi-zoom-in me-1"></i>Zoom In
-            </Link>
-            <Link
-              href={generateChartUrl({
-                table: 'logs',
-                aggFn: 'count',
-                field: undefined,
-                groupBy: ['level'],
-              })}
-              className="text-muted-hover text-decoration-none fs-8"
-            >
-              <i className="bi bi-plus-circle me-1"></i>Create Chart
-            </Link>
-          </div>
-        </div>
-        <div style={{ height: 110 }} className="my-2 px-3 w-100">
-          {/* Hack, recharts will release real fix soon https://github.com/recharts/recharts/issues/172 */}
-          <div
-            style={{
-              position: 'relative',
-              width: '100%',
-              paddingBottom: '110px',
-            }}
-          >
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    top: 0,
+                  }}
+                >
+                  {isReady ? (
+                    <HDXHistogram
+                      config={chartsConfig}
+                      onTimeRangeSelect={onTimeRangeSelect}
+                      isLive={isLive}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            {shouldShowLiveModeHint && resultsMode === 'search' && (
+              <div
+                className="d-flex justify-content-center"
+                style={{ height: 0 }}
+              >
+                <div style={{ position: 'relative', top: -22, zIndex: 2 }}>
+                  <Button
+                    variant="outline-success"
+                    className="fs-8 bg-hdx-dark py-1"
+                    onClick={() => {
+                      setIsLive(true);
+                    }}
+                  >
+                    <i className="bi text-success bi-lightning-charge-fill me-2" />
+                    Resume Live Tail
+                  </Button>
+                </div>
+              </div>
+            )}
             <div
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-                top: 0,
-              }}
+              className="px-3 flex-grow-1 bg-inherit"
+              style={{ minHeight: 0 }}
             >
               {isReady ? (
-                <HDXHistogram
-                  config={chartsConfig}
-                  onTimeRangeSelect={onTimeRangeSelect}
-                  isLive={isLive}
-                  isUTC={isUTC}
-                />
+                resultsMode === 'search' || isLive ? (
+                  <LogViewerContainer
+                    config={chartsConfig}
+                    onPropertyAddClick={onPropertyAddClick}
+                    generateSearchUrl={generateSearchUrl}
+                    generateChartUrl={generateChartUrl}
+                    onPropertySearchClick={onPropertySearchClick}
+                    isLive={isLive}
+                    setIsLive={setIsLive}
+                    onShowPatternsClick={() => {
+                      setIsLive(false);
+                      setResultsMode('patterns');
+                    }}
+                  />
+                ) : (
+                  <MemoPatternTableWithSidePanel
+                    config={chartsConfig}
+                    onShowEventsClick={onShowEventsClick}
+                  />
+                )
               ) : null}
             </div>
           </div>
-        </div>
-        {shouldShowLiveModeHint && resultsMode === 'search' && (
-          <div className="d-flex justify-content-center" style={{ height: 0 }}>
-            <div style={{ position: 'relative', top: -22, zIndex: 2 }}>
-              <Button
-                variant="outline-success"
-                className="fs-8 bg-hdx-dark py-1"
-                onClick={() => {
-                  setIsLive(true);
-                }}
-              >
-                <i className="bi text-success bi-lightning-charge-fill me-2" />
-                Resume Live Tail
-              </Button>
-            </div>
-          </div>
-        )}
-        <div className="px-3 flex-grow-1 bg-inherit" style={{ minHeight: 0 }}>
-          {isReady ? (
-            resultsMode === 'search' || isLive ? (
-              <LogViewerContainer
-                config={chartsConfig}
-                onPropertyAddClick={onPropertyAddClick}
-                generateSearchUrl={generateSearchUrl}
-                generateChartUrl={generateChartUrl}
-                onPropertySearchClick={onPropertySearchClick}
-                isLive={isLive}
-                setIsLive={setIsLive}
-                isUTC={isUTC}
-                setIsUTC={setIsUTC}
-                onShowPatternsClick={() => {
-                  setIsLive(false);
-                  setResultsMode('patterns');
-                }}
-              />
-            ) : (
-              <MemoPatternTableWithSidePanel
-                isUTC={isUTC}
-                config={chartsConfig}
-                onShowEventsClick={onShowEventsClick}
-              />
-            )
-          ) : null}
         </div>
       </div>
     </div>

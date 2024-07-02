@@ -19,6 +19,7 @@ import {
   withDefault,
 } from 'use-query-params';
 
+import { useUserPreferences } from './useUserPreferences';
 import { usePrevious } from './utils';
 
 const LIVE_TAIL_TIME_QUERY = 'Live Tail';
@@ -33,6 +34,7 @@ const formatDate = (
     ? formatInTimeZone(date, 'Etc/UTC', strFormat)
     : format(date, strFormat);
 };
+
 export const dateRangeToString = (range: [Date, Date], isUTC: boolean) => {
   return `${formatDate(range[0], isUTC)} - ${formatDate(range[1], isUTC)}`;
 };
@@ -91,12 +93,10 @@ export function parseValidTimeRange(
 }
 
 export function useTimeQuery({
-  isUTC,
   defaultValue = LIVE_TAIL_TIME_QUERY,
   defaultTimeRange = [-1, -1],
   isLiveEnabled = true,
 }: {
-  isUTC: boolean;
   defaultValue?: string;
   defaultTimeRange?: [number, number];
   isLiveEnabled?: boolean;
@@ -105,6 +105,10 @@ export function useTimeQuery({
   // We need to return true in SSR to prevent mismatch issues
   const isReady = typeof window === 'undefined' ? true : router.isReady;
   const prevIsReady = usePrevious(isReady);
+
+  const {
+    userPreferences: { isUTC },
+  } = useUserPreferences();
 
   const [displayedTimeInputValue, setDisplayedTimeInputValue] = useState<
     undefined | string
@@ -401,8 +405,6 @@ export function useTimeQuery({
 }
 
 export type UseTimeQueryInputType = {
-  /** Whether the displayed value should be in UTC */
-  isUTC: boolean;
   /**
    * Optional initial value to be set as the `displayedTimeInputValue`.
    * If no value is provided it will return a date string for the initial
@@ -423,13 +425,16 @@ export type UseTimeQueryReturnType = {
 };
 
 export function useNewTimeQuery({
-  isUTC,
   initialDisplayValue,
   initialTimeRange,
 }: UseTimeQueryInputType): UseTimeQueryReturnType {
   const router = useRouter();
   // We need to return true in SSR to prevent mismatch issues
   const isReady = typeof window === 'undefined' ? true : router.isReady;
+
+  const {
+    userPreferences: { isUTC },
+  } = useUserPreferences();
 
   const [displayedTimeInputValue, setDisplayedTimeInputValue] =
     useState<string>(() => {

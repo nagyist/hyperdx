@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import { sub } from 'date-fns';
 import { Button, Form } from 'react-bootstrap';
-import { toast } from 'react-toastify';
 import { NumberParam } from 'serialize-query-params';
 import {
   StringParam,
@@ -10,6 +9,7 @@ import {
   useQueryParams,
   withDefault,
 } from 'use-query-params';
+import { notifications } from '@mantine/notifications';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 import api from './api';
@@ -19,10 +19,8 @@ import SearchInput from './SearchInput';
 import SearchTimeRangePicker from './SearchTimeRangePicker';
 import SessionSidePanel from './SessionSidePanel';
 import { parseTimeQuery, useTimeQuery } from './timeQuery';
-import {
-  formatDistanceToNowStrictShort,
-  formatHumanReadableDate,
-} from './utils';
+import { FormatTime } from './useFormatTime';
+import { formatDistanceToNowStrictShort } from './utils';
 
 function SessionCard({
   email,
@@ -74,7 +72,7 @@ function SessionCard({
       <div className="text-end">
         <div>Last active {timeAgo} ago</div>
         <div className="text-muted fs-8 mt-1">
-          Started on {formatHumanReadableDate(minTime)}
+          Started on <FormatTime value={minTime} />
         </div>
       </div>
     </div>
@@ -241,7 +239,6 @@ export default function SessionsPage() {
     setDisplayedTimeInputValue,
     onSearch,
   } = useTimeQuery({
-    isUTC: false,
     defaultValue: 'Past 1h',
     defaultTimeRange: [
       defaultTimeRange?.[0]?.getTime() ?? -1,
@@ -442,7 +439,10 @@ export default function SessionsPage() {
                       ).trim(),
                     );
 
-                    toast.success('Added filter to search query');
+                    notifications.show({
+                      color: 'green',
+                      message: 'Added filter to search query',
+                    });
                     inputRef.current?.focus();
 
                     // @ts-ignore
